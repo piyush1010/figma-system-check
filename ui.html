@@ -1,0 +1,78 @@
+<style>
+  body { font: 13px Inter, system-ui, sans-serif; margin: 0; padding: 16px; color: var(--figma-color-text); background: var(--figma-color-bg); }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  p.hint { margin: 0 0 12px; color: var(--figma-color-text-secondary); }
+  button { font: inherit; border-radius: 6px; border: 1px solid var(--figma-color-border); background: var(--figma-color-bg); color: var(--figma-color-text); padding: 6px 10px; cursor: pointer; }
+  button.primary { background: var(--figma-color-bg-brand); color: var(--figma-color-text-onbrand); border-color: transparent; width: 100%; padding: 8px; }
+  .scores { display: flex; gap: 8px; margin: 16px 0; }
+  .score { flex: 1; border: 1px solid var(--figma-color-border); border-radius: 8px; padding: 10px; }
+  .score b { display: block; font-size: 22px; }
+  .score span { color: var(--figma-color-text-secondary); font-size: 11px; }
+  .issue { border-top: 1px solid var(--figma-color-border); padding: 10px 0; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--figma-color-border); flex: none; }
+  .meta { color: var(--figma-color-text-secondary); font-size: 11px; margin: 4px 0 6px 26px; }
+  .actions { margin-left: 26px; display: flex; gap: 6px; }
+  .error { color: var(--figma-color-text-danger); margin-top: 12px; }
+  .ok { color: var(--figma-color-text-success); margin-top: 8px; }
+</style>
+
+<h1>System Check</h1>
+<p class="hint">Select a screen or component, then scan to see how much of it uses your tokens.</p>
+<button class="primary" id="scan">Scan selection</button>
+<div id="out"></div>
+
+<script>
+  const out = document.getElementById("out");
+  let issues = [];
+  let unstyledText = [];
+
+  document.getElementById("scan").onclick = () => parent.postMessage({ pluginMessage: { type: "scan" } }, "*");
+
+  function send(msg) { parent.postMessage({ pluginMessage: msg }, "*"); }
+
+  window.onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+    if (msg.type === "error") { out.innerHTML = '<div class="error"></div>'; out.firstChild.textContent = msg.message; return; }
+    if (msg.type !== "results") return;
+    issues = msg.issues;
+    unstyledText = msg.unstyledText || [];
+
+    let html = '<div class="scores">' +
+      '<div class="score"><b>' + msg.colors.percent + '%</b><span>colours linked (' + msg.colors.linked + '/' + msg.colors.total + ')</span></div>' +
+      '<div class="score"><b>' + msg.text.percent + '%</b><span>text using styles (' + msg.text.linked + '/' + msg.text.total + ')</span></div>' +
+      '</div>';
+
+    if (unstyledText.length > 0) {
+      html += '<div class="issue"><div class="row"><b>' + unstyledText.length + ' text layer' + (unstyledText.length === 1 ? '' : 's') + ' without a text style</b></div>' +
+        '<div class="meta">Select them, then pick a style in the Typography panel.</div>' +
+        '<div class="actions"><button data-act="text">Show unstyled text</button></div></div>';
+    }
+
+    if (issues.length === 0) {
+      html += '<div class="ok">Every colour in this selection uses a token. Nice.</div>';
+    } else {
+      html += '<p class="hint">Hard-coded colours, most used first' + (msg.preferred ? ' · suggestions prefer the "' + msg.preferred + '" collection' : '') + ':</p>';
+      issues.forEach((issue, i) => {
+        const s = issue.suggestion;
+        html += '<div class="issue">' +
+          '<div class="row"><div class="swatch" style="background:' + issue.hex + '"></div><b>' + issue.hex + '</b>&nbsp;· used ' + issue.count + '×</div>' +
+          '<div class="meta">' + (s ? (s.exact ? 'Exact match: ' : 'Closest token: ') + s.label + ' (' + s.hex + ')' : 'No colour variables found in this file') + '</div>' +
+          '<div class="actions"><button data-act="select" data-i="' + i + '">Show layers</button>' +
+          (s ? '<button data-act="fix" data-i="' + i + '">Link to ' + s.label.split(" / ").pop() + '</button>' : '') + '</div>' +
+          '</div>';
+      });
+    }
+    out.innerHTML = html;
+  };
+
+  out.onclick = (event) => {
+    const btn = event.target.closest("button");
+    if (!btn) return;
+    if (btn.dataset.act === "text") { send({ type: "select", nodeIds: unstyledText }); return; }
+    const issue = issues[Number(btn.dataset.i)];
+    if (btn.dataset.act === "select") send({ type: "select", nodeIds: issue.nodeIds });
+    if (btn.dataset.act === "fix") send({ type: "fix", hex: issue.hex, nodeIds: issue.nodeIds, variableId: issue.suggestion.id });
+  };
+</script>
